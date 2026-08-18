@@ -73,13 +73,29 @@ if st.button("Run Backtest", type="primary", use_container_width=True):
                 if isinstance(data, pd.Series):
                     data = data.to_frame(name=tickers[0])
 
-                data = data.dropna(how="all")
+                # Tickers yfinance couldn't find (bad symbol, delisted) either never appear as a column,
+                # or appear as a column that's entirely NaN — treat both as missing
+                missing_tickers = [t for t in tickers if t not in data.columns or data[t].isna().all()]
 
-                if len(data) < 2:
-                    st.error("Not enough data for selected period. Try a longer lookback or check your tickers.")
+                # Keep only the tickers we actually got data for, preserving order, and carry their
+                # matching weights along so normalized_weights and data.columns stay aligned by index
+                valid_tickers = [t for t in tickers if t not in missing_tickers]
+                valid_weights = [weights[tickers.index(t)] for t in valid_tickers]
+                data = data[valid_tickers]
+
+                # Keep only dates where EVERY remaining ticker has a price — a single missing quote
+                # (rate limit, holiday mismatch) would otherwise poison the portfolio value calc with NaN
+                data = data.dropna(how="any")
+
+                if missing_tickers:
+                    st.warning(f"⚠️ No data found for: {', '.join(missing_tickers)}. Check the ticker symbol(s).")
+
+                if not valid_tickers or len(data) < 2:
+                    st.error("Not enough data for selected period. Try a longer lookback, check your tickers, or retry (Yahoo Finance may be rate-limiting).")
                 else:
+                    tickers = valid_tickers
                     # Normalize weights
-                    normalized_weights = np.array(weights) / sum(weights)
+                    normalized_weights = np.array(valid_weights) / sum(valid_weights)
 
                     # Determine rebalance frequency in days
                     if rebalance_freq == "Daily":
