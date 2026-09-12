@@ -19,23 +19,28 @@ with col1:
 
     col_tickers, col_weights = st.columns(2)
 
-    tickers = []
-    weights = []
+    raw_tickers = []
+    raw_weights = []
 
     with col_tickers:
         st.markdown("**Tickers**")
         for i in range(num_tickers):
             ticker = st.text_input(f"Ticker {i+1}", placeholder="e.g., AAPL", key=f"ticker_{i}")
-            if ticker:
-                tickers.append(ticker.upper())
+            raw_tickers.append(ticker)
 
     with col_weights:
         st.markdown("**Weight (%)**")
         for i in range(num_tickers):
             weight = st.number_input(f"Weight {i+1}", min_value=0.0, max_value=100.0, value=100/num_tickers, step=0.1, key=f"weight_{i}")
-            weights.append(weight)
+            raw_weights.append(weight)
 
-    total_weight = sum(weights) if weights else 0
+    # Pair each ticker with ITS OWN weight slot before dropping blanks — filtering the two lists
+    # separately would misalign weights with tickers whenever a blank slot isn't the last one
+    # (e.g. slot 2 left empty: tickers=[t0,t2] but weights=[w0,w1,w2], off by one from slot 2 on)
+    tickers = [t.upper() for t in raw_tickers if t]
+    weights = [w for t, w in zip(raw_tickers, raw_weights) if t]
+
+    total_weight = sum(raw_weights) if raw_weights else 0
     weight_status = "✅" if abs(total_weight - 100.0) < 0.1 else "❌"
     st.metric("Total Weight", f"{total_weight:.1f}%", delta=f"{total_weight - 100:.1f}%", delta_color="off")
 
