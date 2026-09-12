@@ -110,9 +110,11 @@ if st.button("Run Backtest", type="primary", use_container_width=True):
                         rebalance_days = 365
 
                     # Initialize portfolio
-                    portfolio_values = []
+                    portfolio_values = []  # value currently held/invested (resets each period if not reinvesting)
+                    gains_kept_values = []  # cumulative gains banked on the side, not reinvested
                     dates = []
                     shares = None
+                    gains_kept = 0.0
                     last_rebalance = data.index[0]
 
                     # Calculate portfolio value over time
@@ -123,37 +125,47 @@ if st.button("Run Backtest", type="primary", use_container_width=True):
                             # Initial buy-in
                             shares = (normalized_weights * portfolio_value) / current_prices.values
                         elif (date - last_rebalance).days >= rebalance_days:
+                            current_value = np.sum(shares * current_prices.values)
                             if reinvest:
                                 # Compound: reallocate using CURRENT portfolio value
-                                current_value = np.sum(shares * current_prices.values)
                                 shares = (normalized_weights * current_value) / current_prices.values
                             else:
-                                # No reinvestment: reset to the ORIGINAL starting balance each period
+                                # No reinvestment: bank this period's gain/loss on the side, then
+                                # reset the invested amount back to the ORIGINAL starting balance
+                                gains_kept += current_value - portfolio_value
                                 shares = (normalized_weights * portfolio_value) / current_prices.values
                             last_rebalance = date
 
                         portfolio_val = np.sum(shares * current_prices.values)
                         portfolio_values.append(portfolio_val)
+                        gains_kept_values.append(gains_kept)
                         dates.append(date)
+
+                    # Total wealth = what's currently invested + whatever gains were banked on the side.
+                    # When reinvest is on, gains_kept is always 0, so this equals portfolio_values.
+                    total_wealth_values = [h + g for h, g in zip(portfolio_values, gains_kept_values)]
 
                     portfolio_df = pd.DataFrame({
                         "Date": dates,
-                        "Portfolio Value": portfolio_values
+                        "Portfolio Value": portfolio_values,
+                        "Gains Kept": gains_kept_values,
+                        "Total Wealth": total_wealth_values
                     })
 
-                    # Calculate metrics
-                    total_return = (portfolio_values[-1] - portfolio_value) / portfolio_value * 100
-                    annualized_return = ((portfolio_values[-1] / portfolio_value) ** (365 / lookback_days) - 1) * 100
-                    max_val = max(portfolio_values)
-                    min_val = min(portfolio_values)
+                    # Calculate metrics off total wealth (invested value + banked gains) — the true
+                    # economic outcome, whether or not gains were reinvested
+                    total_return = (total_wealth_values[-1] - portfolio_value) / portfolio_value * 100
+                    annualized_return = ((total_wealth_values[-1] / portfolio_value) ** (365 / lookback_days) - 1) * 100
+                    max_val = max(total_wealth_values)
+                    min_val = min(total_wealth_values)
                     max_drawdown = (max_val - min_val) / max_val * 100 if max_val > 0 else 0
 
-                    daily_returns = pd.Series(portfolio_values).pct_change().dropna()
+                    daily_returns = pd.Series(total_wealth_values).pct_change().dropna()
                     sharpe_ratio = (daily_returns.mean() / daily_returns.std() * np.sqrt(252)) if daily_returns.std() > 0 else 0
 
                     # Display metrics
                     st.divider()
-                    metric_cols = st.columns(5)
+                    metric_cols = st.columns(6)
 
                     with metric_cols[0]:
                         st.metric("Total Return", f"{total_return:+.2f}%")
@@ -164,27 +176,42 @@ if st.button("Run Backtest", type="primary", use_container_width=True):
                     with metric_cols[3]:
                         st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
                     with metric_cols[4]:
-                        st.metric("Final Value", f"${portfolio_values[-1]:,.0f}")
+                        st.metric("Gains Kept (Banked)", f"${gains_kept_values[-1]:,.0f}",
+                            help="Gains/losses banked on the side at each rebalance instead of being reinvested. Always $0 when reinvesting.")
+                    with metric_cols[5]:
+                        st.metric("Total Value", f"${total_wealth_values[-1]:,.0f}",
+                            help="What's currently invested plus any gains kept on the side.")
 
                     st.divider()
 
-                    # Plot performance
+                    # Stacked chart: invested holdings on the bottom, banked gains stacked on top so
+                    # the total stack height is total wealth (invested + kept gains)
                     fig = go.Figure()
 
                     fig.add_trace(go.Scatter(
                         x=portfolio_df["Date"],
                         y=portfolio_df["Portfolio Value"],
                         mode="lines",
-                        name="Portfolio Value",
-                        line=dict(color="rgb(31, 119, 180)", width=2),
-                        fill="tozeroy",
-                        fillcolor="rgba(31, 119, 180, 0.1)"
+                        name="Portfolio Value (Invested)",
+                        stackgroup="wealth",
+                        line=dict(color="rgb(31, 119, 180)", width=1.5),
+                        fillcolor="rgba(31, 119, 180, 0.35)"
+                    ))
+
+                    fig.add_trace(go.Scatter(
+                        x=portfolio_df["Date"],
+                        y=portfolio_df["Gains Kept"],
+                        mode="lines",
+                        name="Gains Kept (Not Reinvested)",
+                        stackgroup="wealth",
+                        line=dict(color="rgb(44, 160, 44)", width=1.5),
+                        fillcolor="rgba(44, 160, 44, 0.35)"
                     ))
 
                     fig.update_layout(
-                        title="Portfolio Value Over Time",
+                        title="Portfolio Value: Invested vs. Gains Kept",
                         xaxis_title="Date",
-                        yaxis_title="Portfolio Value ($)",
+                        yaxis_title="Value ($)",
                         hovermode="x unified",
                         template="plotly_white",
                         height=500
