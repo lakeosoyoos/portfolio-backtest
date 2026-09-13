@@ -47,6 +47,9 @@ with col1:
 with col2:
     st.subheader("Parameters")
     portfolio_value = st.number_input("Starting Portfolio Value ($)", min_value=1000, value=100000, step=1000)
+    # Browsers strip commas from a native <input type="number"> while it's being edited, so the
+    # thousands separator has to be shown alongside the field rather than inside it
+    st.caption(f"= ${portfolio_value:,.0f}")
 
     lookback_days = st.selectbox("Lookback Period",
         options=[30, 60, 90, 180, 365, 730, 1825],
